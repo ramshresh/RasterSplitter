@@ -26,7 +26,8 @@
 import ogr, gdal, sys, os
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction, QFileDialog
+from qgis.PyQt.QtWidgets import QAction, QFileDialog, QMessageBox
+
 
 # Initialize Qt resources from file resources.py
 from .resources import *
@@ -34,7 +35,7 @@ from .resources import *
 from .RasterSplitter_dialog import RasterSplitterDialog
 import os.path
 
-from qgis.core import QgsProject, Qgis, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsFeatureRequest, QgsProcessing
+from qgis.core import  QgsProject, Qgis, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsFeatureRequest, QgsProcessing
 
 from processing.core.Processing import Processing
 
@@ -78,6 +79,16 @@ class RasterSplitter:
         # Must be set in initGui() to survive plugin reloads
         self.first_start = None
 
+        self.vector_layers = []
+        self.raster_layers = []
+        
+        self.selected_outdir=""
+
+        self.selectedLayerIndex_vector = None
+        self.selectedLayerIndex_raster = None
+        self.selectedLayer_vector = None
+        self.selectedLayer_raster = None
+        
 
         self.expression = "!FID!"
         self.fields=[]
@@ -203,6 +214,14 @@ class RasterSplitter:
         return self._expression
     def get_fields(self):
         return self._fields
+    def get_selectedLayerIndex_vector(self):
+        return self._selectedLayerIndex_vector
+    def get_selectedLayerIndex_raster(self):
+        return self._selectedLayerIndex_raster
+    def get_selectedLayer_vector(self):
+        return self._selectedLayer_vector
+    def get_selectedLayer_raster(self):
+        return self._selectedLayer_raster
 
     
     # setter
@@ -216,7 +235,15 @@ class RasterSplitter:
         self._expression = value
     def set_fields(self, value):
         self._fields = value
-    
+    def set_selectedLayerIndex_vector(self, value):
+        self._selectedLayerIndex_vector = value
+    def set_selectedLayerIndex_raster(self, value):
+        self._selectedLayerIndex_raster = value
+    def set_selectedLayer_vector(self, value):
+        self._selectedLayer_vector = value
+    def set_selectedLayer_raster(self, value):
+        self._selectedLayer_raster = value
+
     def refresh_expression(self):
         self.expression="!FID!"
         self.dlg.textEdit.clear()
@@ -225,19 +252,18 @@ class RasterSplitter:
         #qListView = self.dlg.listWidget
         self.refresh_expression()
         self.dlg.listWidget.clear()
-        
-        
-        selectedLayerIndex_vector = self.dlg.comboBox_vector.currentIndex()
-        selectedLayer_vector = self.vector_layers[selectedLayerIndex_vector]
+    
+        if (self.vector_layers):
+            self.selectedLayerIndex_vector = self.dlg.comboBox_vector.currentIndex()
+            self.selectedLayer_vector = self.vector_layers[self.selectedLayerIndex_vector]
 
-        fields = selectedLayer_vector.fields().names()
-        fields.insert(0, "!FID!")
-        self.fields = fields
-        
-        # Populate the listWidget with all the polygon layer present in the TOC
-        self.dlg.listWidget.addItems(self.fields)
-        self.refresh_expression()
-
+            fields = self.selectedLayer_vector.fields().names()
+            fields.insert(0, "!FID!")
+            self.fields = fields
+            
+            # Populate the listWidget with all the polygon layer present in the TOC
+            self.dlg.listWidget.addItems(self.fields)
+            self.refresh_expression()
 
     def add_to_expression(self, item):
         self.expression = self.dlg.textEdit.toPlainText().strip()
@@ -298,16 +324,14 @@ class RasterSplitter:
         
         return 'FID_'+str(feature.id())
 
-        
-        
-
     def evaluate_sample_filename(self, expression):
-        selectedLayerIndex_vector = self.dlg.comboBox_vector.currentIndex()
-        selectedLayer_vector = self.vector_layers[selectedLayerIndex_vector]
-        
-        if (selectedLayer_vector.featureCount() > 0):
-                feature = selectedLayer_vector.getFeature(0)
-                return self.evaluate_filename(feature, self.expression)
+        if (self.vector_layers):
+            self.selectedLayerIndex_vector = self.dlg.comboBox_vector.currentIndex()
+            self.selectedLayer_vector = self.vector_layers[self.selectedLayerIndex_vector]
+            
+            if (self.selectedLayer_vector.featureCount() > 0):
+                    feature = self.selectedLayer_vector.getFeature(0)
+                    return self.evaluate_filename(feature, self.expression)
 
     def set_textBrowser_preview(self):
         self.expression = self.dlg.textEdit.toPlainText().strip()
@@ -315,14 +339,7 @@ class RasterSplitter:
         text = self.evaluate_sample_filename(self.expression)
         self.dlg.textBrowser.setText(text)
 
-    # creating a property object
-    raster_layers = property(get_raster_layers, set_raster_layers)
-    vector_layers = property(get_vector_layers, set_vector_layers)
-    selected_outdir = property(get_selected_outdir, set_selected_outdir)
-
-
-
-
+    
     def fetch_layers_all(self):
         # Fetch the currently loaded layers
         layers_tree = QgsProject.instance().layerTreeRoot().children()
@@ -348,11 +365,9 @@ class RasterSplitter:
         
         self.refresh_fields()
 
-        
-
     def select_outdir(self):
-        selected_outdir = QFileDialog.getExistingDirectory(self.dlg, caption='Choose Directory', directory=os.getcwd())
-        self.dlg.lineEdit_outdir.setText(selected_outdir)
+        self.selected_outdir = QFileDialog.getExistingDirectory(self.dlg, caption='Choose Directory', directory=os.getcwd())
+        self.dlg.lineEdit_outdir.setText(self.selected_outdir)
 
     def raster_has_data(self, raster_file):
         src_ds = gdal.Open(raster_file)
@@ -385,11 +400,11 @@ class RasterSplitter:
         return False
     def split_raster(self):
         
-        selectedLayerIndex_vector = self.dlg.comboBox_vector.currentIndex()
-        selectedLayer_vector = self.vector_layers[selectedLayerIndex_vector]
+        self.selectedLayerIndex_vector = self.dlg.comboBox_vector.currentIndex()
+        self.selectedLayer_vector = self.vector_layers[self.selectedLayerIndex_vector]
 
-        selectedLayerIndex_raster = self.dlg.comboBox_raster.currentIndex()
-        selectedLayer_raster = self.raster_layers[selectedLayerIndex_raster]
+        self.selectedLayerIndex_raster = self.dlg.comboBox_raster.currentIndex()
+        self.selectedLayer_raster = self.raster_layers[self.selectedLayerIndex_raster]
         
         self.selected_outdir = self.dlg.lineEdit_outdir.text()
 
@@ -407,13 +422,13 @@ class RasterSplitter:
         print ("TEST")
 
 
-        for feature in selectedLayer_vector.getFeatures():
+        for feature in self.selectedLayer_vector.getFeatures():
       
             out_name = self.evaluate_filename(feature, self.expression)
             out_file = os.path.join(self.selected_outdir, "{}.tiff".format(out_name))
     
      
-            new_temp_layer = selectedLayer_vector.materialize(QgsFeatureRequest().setFilterFid(feature.id()))
+            new_temp_layer = self.selectedLayer_vector.materialize(QgsFeatureRequest().setFilterFid(feature.id()))
             
             #Algorithm ID: gdal:cliprasterbymasklayer
             parameters = {
@@ -421,7 +436,7 @@ class RasterSplitter:
                 'CROP_TO_CUTLINE': True,
                 'DATA_TYPE': 0,
                 'EXTRA': '',
-                'INPUT': selectedLayer_raster,
+                'INPUT': self.selectedLayer_raster,
                 'KEEP_RESOLUTION': False,
                 'MASK': new_temp_layer , #feature,#selectedLayer_vector,
                 'MULTITHREADING': False,
@@ -439,7 +454,7 @@ class RasterSplitter:
      
             #rasterGeometry = ogr.CreateGeometryFromWkt(selectedLayer_raster.dataProvider().extent().asWktPolygon())
             
-            rasterGeometry = ogr.CreateGeometryFromWkt(selectedLayer_raster.dataProvider().extent().asWktPolygon())
+            rasterGeometry = ogr.CreateGeometryFromWkt(self.selectedLayer_raster.dataProvider().extent().asWktPolygon())
             featureGeometry =  ogr.CreateGeometryFromWkt(feature.geometry().asWkt())
             
 
@@ -461,6 +476,33 @@ class RasterSplitter:
         # gdal -clip poly.shp -multi -name [attrib] in.tif outdir
         self.iface.messageBar().pushMessage("Success", "Output file written at {}".format(self.selected_outdir), level=Qgis.Success, duration=20)
      
+    def check_values(self):
+        if (not self.vector_layers):
+            QMessageBox.information(None, "Warning!", "Select a Polygon Shapefile" )
+            return False
+        if (not self.raster_layers):
+            QMessageBox.information(None, "Warning!", "Select a Raster file" )
+            return False
+
+        if (self.selected_outdir == ""):
+            QMessageBox.information(None, "Warning!", "Select a Output directory" )
+            return False
+        return True
+    
+    def accept(self):
+        if self.check_values():
+            self.done(1)  # Only accept the dialog if all inputs are valid
+    
+    # creating a property object
+    raster_layers = property(get_raster_layers, set_raster_layers)
+    vector_layers = property(get_vector_layers, set_vector_layers)
+    selected_outdir = property(get_selected_outdir, set_selected_outdir)
+    selectedLayerIndex_vector = property(get_selectedLayerIndex_vector, set_selectedLayerIndex_vector)
+    selectedLayerIndex_raster = property(get_selectedLayerIndex_raster, set_selectedLayerIndex_raster)
+    selected_selectedLayer_vector = property(get_selectedLayer_vector, set_selectedLayer_vector)
+    selected_selectedLayer_raster = property(get_selectedLayer_raster, set_selectedLayer_raster)
+    selected_expression = property(get_expression, set_expression)
+    selected_fields = property(get_fields, set_fields)
 
     def run(self):
         """Run method that performs all the real work"""
@@ -474,10 +516,12 @@ class RasterSplitter:
             self.dlg.comboBox_vector.currentTextChanged.connect(self.refresh_fields)
             self.dlg.textEdit.textChanged.connect(self.set_textBrowser_preview)
             self.dlg.listWidget.itemDoubleClicked.connect(self.add_to_expression)
+            self.dlg.refresh.clicked.connect(self.fetch_layers_all)
             
 
         # Fetch all layers and populate comboBox for raster and vector layers loaded in QGIS
         self.fetch_layers_all()
+
 
         # show the dialog
         self.dlg.show()
@@ -487,6 +531,13 @@ class RasterSplitter:
         if result:
             # Do something useful here - delete the line containing pass and
             # substitute with your code.
-            self.split_raster()
+            if(self.check_values()):
+                self.split_raster()
             
+            else:
+                self.run()
+                self.iface.messageBar().pushMessage("Warning", "Not Executed : Empty Values", level=Qgis.Success, duration=20)
+     
+
+
  
